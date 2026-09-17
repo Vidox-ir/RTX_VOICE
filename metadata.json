@@ -1,0 +1,6 @@
+{
+  "name": "RTX_VOICE",
+  "description": "Discord-style voice and community platform featuring 10 role-based voice rooms (Admin, VIP, and 4-capacity Public rooms) with RTX Voice audio enhancement.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

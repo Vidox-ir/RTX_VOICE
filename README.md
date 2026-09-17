@@ -1,11 +1,57 @@
-<div align="center">
+# RTX_VOICE 🎙️
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+سرور صوتی و کامیونیتی سبک دیسکورد با پردازش صوتی بلادرنگ فیلتر هوش مصنوعی RTX، ده اتاق صوتی تفکیک‌شده بر اساس رول (Admin، VIP و عمومی ۴ نفره)، انتقال صدای واقعی P2P با WebRTC و پایگاه‌داده Supabase.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🌟 ویژگی‌ها (Features)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+- **انتقال صدای زنده و واقعی (WebRTC P2P):** صدای شفاف بین اعضای حاضر در هر روم صوتی بدون تاخیر با استفاده از شبکه مش WebRTC و سرورهای STUN گوگل.
+- **شبیه‌ساز سخت‌افزاری RTX Voice DSP:**
+  - حذف نویز پس‌زمینه (Noise Suppression)
+  - حذف اکوی محیط (Room Echo Cancellation)
+  - تقویت صدای بم و گرمی صدا (Bass Boost)
+  - تحلیل فرکانس و طیف‌نگار لحظه‌ای (Real-time Audio Visualizer Spectrum)
+- **۱۰ اتاق صوتی اختصاصی تفکیک‌شده بر اساس سطح دسترسی:**
+  - 👑 ۲ اتاق مخصوص ادمین‌ها (Admin Voice)
+  - ⭐ ۳ اتاق VIP با اولویت پهنای باند ۳۲۰kbps
+  - 👥 ۵ اتاق عمومی ۴ نفره با اعمال محدودیت دقیق ظرفیت
+- **سیستم احراز هویت با ایمیل و رول‌های امنیتی (Supabase Auth & Roles):**
+  - ثبت‌نام و ورود با ایمیل و پسورد
+  - تمام کاربران با رول `member` ثبت‌نام می‌شوند و امکان ارتقای خود به ادمین یا VIP را در ظاهر سایت ندارند.
+  - تعیین دسترسی‌ها به صورت امن از طریق دیتابیس Supabase
+- **آواتارهای گیمینگ سایبرپانک و بدون عکس واقعی:** انتخاب آواتارهای رباتیک و گیمری
+- **ساندپد اختصاصی (Discord-style Soundpad):** پخش و ارسال افکت‌های صوتی در روم‌ها
+- **چت متنی بلادرنگ (Supabase Realtime Chat):** همراه با ری‌اکشن به پیام‌ها
 
-</div>
+---
+
+## 🚀 نحوه راه‌اندازی و اجرا (Getting Started)
+
+### ۱. نصب وابستگی‌ها
+```bash
+npm install
+```
+
+### ۲. تنظیم متغیرهای محیطی
+یک فایل `.env` بر اساس `.env.example` بسازید:
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+### ۳. ساخت دیتابیس در Supabase
+در پنل Supabase خود وارد بخش **SQL Editor** شده و کدهای موجود در پنجره تنظیمات دیتابیس برنامه یا فایل `src/supabase.ts` را اجرا کنید.
+
+### ۴. اجرای لوکال
+```bash
+npm run dev
+```
+
+پروژه روی پورت `3000` اجرا خواهد شد.
+
+### ۵. بیلد نهایی برای پروداکشن
+```bash
+npm run build
+```
+فایل‌های خروجی در پوشه `dist` قرار می‌گیرند و قابل دیپلوی روی Vercel، Netlify، Cloud Run و GitHub Pages هستند.
