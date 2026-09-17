@@ -1,8 +1,8 @@
-import Peer, { MediaConnection } from 'peerjs';
-import { AppUser } from './types';
+import Peer, { MediaConnection, DataConnection } from 'peerjs';
 
 /**
- * WebRTC Mesh Network for Real Voice Rooms using PeerJS cloud signaling (free)
+ * Universal P2P Voice Room Manager using WebRTC Mesh (PeerJS)
+ * Automatically discovers peers in the room even if database presence is delayed or offline!
  */
 export class WebRTCVoiceRoomManager {
   private peer: Peer | null = null;
@@ -10,16 +10,17 @@ export class WebRTCVoiceRoomManager {
   private currentRoomId: string = '';
   private localStream: MediaStream | null = null;
   private activeCalls: Map<string, MediaConnection> = new Map();
+  private activeDataConns: Map<string, DataConnection> = new Map();
   private remoteAudioElements: Map<string, HTMLAudioElement> = new Map();
   private onUserSpeakingChange: ((userId: string, isSpeaking: boolean) => void) | null = null;
-  private onUserJoinLeave: (() => void) | null = null;
+  private onPeerDiscovered: ((remoteUserId: string) => void) | null = null;
 
   public async joinVoice(options: {
     userId: string;
     roomId: string;
     localStream: MediaStream;
     onUserSpeaking?: (userId: string, isSpeaking: boolean) => void;
-    onParticipantsChange?: () => void;
+    onPeerDiscovered?: (remoteUserId: string) => void;
   }): Promise<string> {
     this.leaveVoice();
 
@@ -27,14 +28,13 @@ export class WebRTCVoiceRoomManager {
     this.currentRoomId = options.roomId;
     this.localStream = options.localStream;
     this.onUserSpeakingChange = options.onUserSpeaking || null;
-    this.onUserJoinLeave = options.onParticipantsChange || null;
+    this.onPeerDiscovered = options.onPeerDiscovered || null;
 
-    // Clean room and user string to be alphanumeric
     const safeRoomId = options.roomId.replace(/[^a-zA-Z0-9_-]/g, '');
-    const peerId = `rtx_${safeRoomId}_${options.userId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+    const safeUserId = options.userId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const peerId = `rtx_${safeRoomId}_${safeUserId}`;
 
-    return new Promise((resolve, reject) => {
-      // Free public PeerJS server
+    return new Promise((resolve) => {
       this.peer = new Peer(peerId, {
         debug: 1,
         config: {
@@ -42,32 +42,31 @@ export class WebRTCVoiceRoomManager {
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' },
           ],
         },
       });
 
       this.peer.on('open', (id) => {
         console.log('[WebRTC RTX Voice] Connected with PeerID:', id);
-        this.setupIncomingCalls();
+        this.setupIncomingHandlers();
         resolve(id);
       });
 
       this.peer.on('error', (err) => {
-        console.warn('[WebRTC RTX Voice] Peer error:', err);
-        // If ID taken or warning, still allow graceful fallback
+        console.warn('[WebRTC RTX Voice] Peer connection note:', err.type || err);
         resolve(peerId);
       });
     });
   }
 
-  // Answer incoming calls from other users in the room
-  private setupIncomingCalls() {
+  // Answer incoming media calls and data connections
+  private setupIncomingHandlers() {
     if (!this.peer) return;
 
+    // Incoming voice calls
     this.peer.on('call', (call) => {
       console.log('[WebRTC RTX Voice] Incoming call from:', call.peer);
-
-      // Answer call with our processed RTX local audio stream
       call.answer(this.localStream || undefined);
 
       call.on('stream', (remoteStream) => {
@@ -78,16 +77,39 @@ export class WebRTCVoiceRoomManager {
         this.cleanupPeerAudio(call.peer);
       });
 
-      call.on('error', (e) => {
-        console.warn('[WebRTC RTX Voice] Call error:', e);
+      call.on('error', () => {
         this.cleanupPeerAudio(call.peer);
       });
 
       this.activeCalls.set(call.peer, call);
+
+      const remoteUserId = this.extractUserIdFromPeerId(call.peer);
+      if (remoteUserId && this.onPeerDiscovered) {
+        this.onPeerDiscovered(remoteUserId);
+      }
+    });
+
+    // Incoming P2P data connections for presence handshake
+    this.peer.on('connection', (conn) => {
+      conn.on('open', () => {
+        conn.send({ type: 'HANDSHAKE', userId: this.myUserId, roomId: this.currentRoomId });
+      });
+
+      conn.on('data', (data: unknown) => {
+        const payload = data as { type?: string; userId?: string; roomId?: string };
+        if (payload?.type === 'HANDSHAKE' && payload.roomId === this.currentRoomId && payload.userId) {
+          if (this.onPeerDiscovered) {
+            this.onPeerDiscovered(payload.userId);
+          }
+          // Also call them back with audio if not called
+          const expectedPeerId = `rtx_${this.currentRoomId.replace(/[^a-zA-Z0-9_-]/g, '')}_${payload.userId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+          this.callPeer(expectedPeerId);
+        }
+      });
     });
   }
 
-  // Call another peer directly
+  // Call another peer directly with voice stream
   public callPeer(remotePeerId: string) {
     if (!this.peer || !this.localStream) return;
     if (this.activeCalls.has(remotePeerId)) return;
@@ -110,11 +132,20 @@ export class WebRTCVoiceRoomManager {
 
       this.activeCalls.set(remotePeerId, call);
     } catch (e) {
-      console.warn('Call peer failed:', e);
+      console.warn('[WebRTC] Call peer warning:', e);
     }
   }
 
-  // Attach remote stream to an HTMLAudioElement and monitor volume
+  // Helper to extract user ID
+  private extractUserIdFromPeerId(peerId: string): string {
+    const parts = peerId.split('_');
+    if (parts.length >= 3) {
+      return parts.slice(2).join('_');
+    }
+    return peerId;
+  }
+
+  // Attach remote stream to audio element and analyze speaking volume
   private attachRemoteStream(peerId: string, stream: MediaStream) {
     let audio = this.remoteAudioElements.get(peerId);
     if (!audio) {
@@ -126,10 +157,10 @@ export class WebRTCVoiceRoomManager {
 
     audio.srcObject = stream;
     audio.play().catch((err) => {
-      console.log('Audio autoplay blocked until user gesture:', err);
+      console.log('Audio autoplay waiting for user interaction:', err);
     });
 
-    // Web Audio Analyser for speaking indicator on other users
+    // Web Audio Analyser to show green ring when friend talks
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioCtx();
@@ -141,16 +172,21 @@ export class WebRTCVoiceRoomManager {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const monitor = () => {
         if (!this.remoteAudioElements.has(peerId)) {
-          ctx.close();
+          try {
+            ctx.close();
+          } catch (e) {
+            // ignore
+          }
           return;
         }
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        const isSpeaking = sum / dataArray.length > 12;
+        const isSpeaking = sum / dataArray.length > 10;
 
+        const userId = this.extractUserIdFromPeerId(peerId);
         if (this.onUserSpeakingChange) {
-          this.onUserSpeakingChange(peerId, isSpeaking);
+          this.onUserSpeakingChange(userId, isSpeaking);
         }
         requestAnimationFrame(monitor);
       };
@@ -171,8 +207,23 @@ export class WebRTCVoiceRoomManager {
   }
 
   public leaveVoice() {
-    this.activeCalls.forEach((call) => call.close());
+    this.activeCalls.forEach((call) => {
+      try {
+        call.close();
+      } catch (e) {
+        // ignore
+      }
+    });
     this.activeCalls.clear();
+
+    this.activeDataConns.forEach((conn) => {
+      try {
+        conn.close();
+      } catch (e) {
+        // ignore
+      }
+    });
+    this.activeDataConns.clear();
 
     this.remoteAudioElements.forEach((audio) => {
       audio.srcObject = null;

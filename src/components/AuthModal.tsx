@@ -1,21 +1,15 @@
 import React, { useState } from 'react';
-import { getSupabase, isSupabaseConfigured, getStoredSupabaseConfig } from '../supabase';
+import { getSupabase, isSupabaseConfigured } from '../supabase';
 import { GAMING_AVATARS } from '../avatars';
-import { Mail, Lock, User, Sparkles, ShieldCheck, AlertCircle, LogIn, UserPlus, Database, ExternalLink } from 'lucide-react';
+import { Mail, Lock, User, UserPlus, LogIn, AlertCircle, ShieldCheck } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  onOpenDbModal: () => void;
 }
 
-export const AuthModal: React.FC<Props> = ({
-  isOpen,
-  onClose,
-  onSuccess,
-  onOpenDbModal,
-}) => {
+export const AuthModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,22 +21,19 @@ export const AuthModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const isConfigured = isSupabaseConfigured();
-  const { url } = getStoredSupabaseConfig();
-
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!isConfigured) {
-      setErrorMsg('ابتدا لازم است آدرس دیتابیس Supabase را در بخش DB وارد کنید.');
+    if (!isSupabaseConfigured()) {
+      setErrorMsg('دیتابیس هنوز در سرور فعال نشده است. لطفاً به عنوان مهمان وارد اتاق شوید.');
       return;
     }
 
     const supabase = getSupabase();
     if (!supabase) {
-      setErrorMsg('خطا در بارگذاری سرویس دیتابیس.');
+      setErrorMsg('خطا در برقراری ارتباط با دیتابیس.');
       return;
     }
 
@@ -50,7 +41,7 @@ export const AuthModal: React.FC<Props> = ({
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password: password.trim(),
           options: {
@@ -62,35 +53,24 @@ export const AuthModal: React.FC<Props> = ({
         });
 
         if (error) {
-          // If error contains invalid path or similar
-          if (error.message.includes('Invalid path') || error.message.includes('URL')) {
-            setErrorMsg(`خطای آدرس پروژه: آدرس وارد شده در DB معتبر نیست یا مسیر اضافه دارد. آدرس فعلی: ${url}`);
-          } else {
-            setErrorMsg(error.message);
-          }
+          setErrorMsg(error.message);
         } else {
-          setSuccessMsg('ثبت نام با موفقیت انجام شد! در حال انتقال...');
+          setSuccessMsg('حساب با موفقیت ایجاد شد! خوش آمدید.');
           setTimeout(() => {
             onSuccess();
             onClose();
-          }, 1000);
+          }, 900);
         }
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password: password.trim(),
         });
 
         if (error) {
-          if (error.message.includes('Invalid login credentials')) {
-            setErrorMsg('ایمیل یا رمز عبور اشتباه است.');
-          } else if (error.message.includes('Invalid path') || error.message.includes('URL')) {
-            setErrorMsg(`خطای آدرس URL دیتابیس در بخش DB: لطفاً آدرس را به صورت https://xxxx.supabase.co تنظیم کنید.`);
-          } else {
-            setErrorMsg(error.message);
-          }
+          setErrorMsg(error.message.includes('Invalid login') ? 'ایمیل یا رمز عبور نامعتبر است.' : error.message);
         } else {
-          setSuccessMsg('ورود با موفقیت انجام شد!');
+          setSuccessMsg('ورود موفقیت‌آمیز بود!');
           setTimeout(() => {
             onSuccess();
             onClose();
@@ -99,11 +79,7 @@ export const AuthModal: React.FC<Props> = ({
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'خطای ارتباط با سرور.';
-      if (msg.includes('Invalid path')) {
-        setErrorMsg('خطای Invalid path: آدرس Supabase وارد شده دارای اسلش یا مسیر اضافی در انتهاست. وارد بخش DB شده و آدرس را چک کنید.');
-      } else {
-        setErrorMsg(msg);
-      }
+      setErrorMsg(msg);
     } finally {
       setLoading(false);
     }
@@ -122,31 +98,10 @@ export const AuthModal: React.FC<Props> = ({
           </h2>
           <p className="text-xs text-neutral-400 mt-1">
             {isSignUp
-              ? 'با ایمیل ثبت‌نام کنید. تمام کاربران ابتدا با رول Member وارد می‌شوند.'
-              : 'ایمیل و رمزعبور خود را جهت ورود وارد کنید.'}
+              ? 'با ایمیل ثبت‌نام کنید. تمام کاربران جدید با رول Member شروع می‌کنند.'
+              : 'ایمیل و رمزعبور خود را وارد نمایید.'}
           </p>
         </div>
-
-        {/* Supabase Notice if not configured */}
-        {!isConfigured && (
-          <div className="mx-6 mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold">آدرس پروژه Supabase هنوز وارد نشده است.</span>
-              <p className="text-[11px] text-amber-200/80 mt-0.5">
-                برای اتصال دیتابیس واقعی، لازم است آدرس پروژه‌تان را در بخش DB وارد کنید.
-              </p>
-              <button
-                type="button"
-                onClick={onOpenDbModal}
-                className="mt-1.5 px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 rounded-lg text-xs font-bold text-white transition flex items-center gap-1"
-              >
-                <Database className="w-3.5 h-3.5" />
-                تنظیم آدرس URL دیتابیس ➔
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Form */}
         <form onSubmit={handleAuth} className="px-6 pb-6 space-y-4">
@@ -208,7 +163,7 @@ export const AuthModal: React.FC<Props> = ({
           {isSignUp && (
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-300 mb-1.5">
-                انتخاب آواتار گیمینگ هوش مصنوعی
+                انتخاب آواتار گیمینگ
               </label>
               <div className="grid grid-cols-4 gap-2">
                 {GAMING_AVATARS.map((av, idx) => (
@@ -232,21 +187,7 @@ export const AuthModal: React.FC<Props> = ({
           {errorMsg && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-              <div className="leading-relaxed">
-                <span>{errorMsg}</span>
-                {errorMsg.includes('DB') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenDbModal();
-                    }}
-                    className="block mt-1 font-bold underline text-amber-300 hover:text-white"
-                  >
-                    اصلاح آدرس در پنجره تنظیمات دیتابیس ➔
-                  </button>
-                )}
-              </div>
+              <span>{errorMsg}</span>
             </div>
           )}
 
@@ -271,7 +212,7 @@ export const AuthModal: React.FC<Props> = ({
               className="flex-1 py-3 bg-[#5865f2] hover:bg-[#4752c4] disabled:opacity-50 text-white rounded-xl font-bold text-sm shadow transition flex items-center justify-center gap-2"
             >
               {loading ? (
-                <span className="animate-pulse">در حال ارتباط با سرور...</span>
+                <span className="animate-pulse">در حال ارتباط...</span>
               ) : isSignUp ? (
                 <>
                   <UserPlus className="w-4 h-4" /> ساخت حساب کاربری
@@ -284,11 +225,10 @@ export const AuthModal: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Toggle login vs register */}
           <div className="pt-2 text-center text-xs text-neutral-400 border-t border-[#35363c]">
             {isSignUp ? (
               <span>
-                قبلاً اکانت ساخته‌اید؟{' '}
+                قبلاً ثبت‌نام کرده‌اید؟{' '}
                 <button
                   type="button"
                   onClick={() => {
@@ -297,12 +237,12 @@ export const AuthModal: React.FC<Props> = ({
                   }}
                   className="text-[#5865f2] hover:underline font-bold"
                 >
-                  ورود به حساب
+                  ورود
                 </button>
               </span>
             ) : (
               <span>
-                هنوز حسابی ندارید؟{' '}
+                حساب کاربری ندارید؟{' '}
                 <button
                   type="button"
                   onClick={() => {
@@ -311,7 +251,7 @@ export const AuthModal: React.FC<Props> = ({
                   }}
                   className="text-[#5865f2] hover:underline font-bold"
                 >
-                  ثبت‌نام رایگان
+                  ثبت‌نام
                 </button>
               </span>
             )}

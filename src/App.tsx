@@ -13,10 +13,9 @@ import { RoomChat } from './components/RoomChat';
 import { RTXVoicePanel } from './components/RTXVoicePanel';
 import { UserProfileModal } from './components/UserProfileModal';
 import { SoundpadModal } from './components/SoundpadModal';
-import { SupabaseModal } from './components/SupabaseModal';
 import { AuthModal } from './components/AuthModal';
 
-import { Volume2, Sparkles, Crown, Star, Users, Database, Headset, LogIn, Radio } from 'lucide-react';
+import { Volume2, Sparkles, Crown, Star, Users, Headset, LogIn, Radio } from 'lucide-react';
 
 export default function App() {
   // Current user state (Default is Member, never Admin/VIP without Supabase grant)
@@ -34,7 +33,7 @@ export default function App() {
       id: 'usr_' + Math.random().toString(36).substring(2, 9),
       name: 'بازیکن RTX',
       avatar: GAMING_AVATARS[0],
-      role: 'member', // Strictly member by default.
+      role: 'member',
       isMuted: false,
       isDeafened: false,
       isScreenSharing: false,
@@ -50,7 +49,7 @@ export default function App() {
   // Active voice room
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
 
-  // Participants by room (real users only!)
+  // Participants by room
   const [participantsByRoom, setParticipantsByRoom] = useState<Record<string, AppUser[]>>({});
 
   // Messages per room
@@ -63,7 +62,7 @@ export default function App() {
         userName: 'سرور صوتی RTX',
         userRole: 'admin',
         userAvatar: GAMING_AVATARS[1],
-        content: 'به سرور رسمی RTX_VOICE خوش آمدید! 🎉 انتقال صدای واقعی P2P بدون افت کیفیت با فیلتر هوش مصنوعی RTX فعال است.',
+        content: 'به سرور صوتی RTX خوش آمدید! انتقال صدای P2P شفاف با فیلتر هوش مصنوعی فعال است. وارد اتاق‌ها شده و با دوستان خود صحبت کنید.',
         timestamp: Date.now() - 3600000,
         reactions: { '🎙️': ['system'] },
       },
@@ -72,7 +71,7 @@ export default function App() {
 
   // Audio Engine ref (RTX DSP Filter)
   const audioEngineRef = useRef<RTXAudioEngine | null>(null);
-  // WebRTC Mesh Manager (Sends processed audio to everyone else)
+  // WebRTC Mesh Manager (Universal P2P Voice)
   const webrtcVoiceRef = useRef<WebRTCVoiceRoomManager | null>(null);
 
   const [speakingVolume, setSpeakingVolume] = useState<number>(0);
@@ -81,7 +80,6 @@ export default function App() {
   const [isRTXPanelOpen, setIsRTXPanelOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
   const [isSoundpadOpen, setIsSoundpadOpen] = useState(false);
-  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(isSupabaseConfigured());
   const [supabaseUserEmail, setSupabaseUserEmail] = useState<string | null>(null);
@@ -137,46 +135,53 @@ export default function App() {
     refreshUserFromSupabase();
   }, [isSupabaseConnected]);
 
-  // Real-time Voice Presence Sync via Supabase Table
+  // Real-time Voice Presence Sync
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
 
     const fetchPresence = async () => {
-      const { data } = await supabase.from('rtx_voice_presence').select('*');
-      if (data) {
-        const grouped: Record<string, AppUser[]> = {};
-        data.forEach((row) => {
-          const rId = row.room_id;
-          if (!grouped[rId]) grouped[rId] = [];
+      try {
+        const { data } = await supabase.from('rtx_voice_presence').select('*');
+        if (data) {
+          const grouped: Record<string, AppUser[]> = {};
+          data.forEach((row) => {
+            const rId = row.room_id;
+            if (!grouped[rId]) grouped[rId] = [];
 
-          const existingMe = row.user_id === currentUser.id;
-          grouped[rId].push({
-            id: row.user_id,
-            name: existingMe ? currentUser.name : row.user_name,
-            avatar: existingMe ? currentUser.avatar : (row.user_avatar || GAMING_AVATARS[0]),
-            role: row.user_role || 'member',
-            isMuted: existingMe ? currentUser.isMuted : Boolean(row.is_muted),
-            isDeafened: existingMe ? currentUser.isDeafened : false,
-            isScreenSharing: existingMe ? currentUser.isScreenSharing : false,
-            rtxVoiceActive: Boolean(row.rtx_active),
-            rtxNoiseSuppression: 80,
-            rtxRoomEchoRemoval: true,
-            rtxVoiceBassBoost: true,
-            isSpeaking: existingMe ? currentUser.isSpeaking : Boolean(row.is_speaking),
-            speakingVolume: 0,
+            const existingMe = row.user_id === currentUser.id;
+            grouped[rId].push({
+              id: row.user_id,
+              name: existingMe ? currentUser.name : row.user_name,
+              avatar: existingMe ? currentUser.avatar : (row.user_avatar || GAMING_AVATARS[0]),
+              role: row.user_role || 'member',
+              isMuted: existingMe ? currentUser.isMuted : Boolean(row.is_muted),
+              isDeafened: existingMe ? currentUser.isDeafened : false,
+              isScreenSharing: existingMe ? currentUser.isScreenSharing : false,
+              rtxVoiceActive: Boolean(row.rtx_active),
+              rtxNoiseSuppression: 80,
+              rtxRoomEchoRemoval: true,
+              rtxVoiceBassBoost: true,
+              isSpeaking: existingMe ? currentUser.isSpeaking : Boolean(row.is_speaking),
+              speakingVolume: 0,
+            });
+
+            // Connect to peer voice stream if in same room
+            if (activeRoomId && rId === activeRoomId && !existingMe && row.peer_id && webrtcVoiceRef.current) {
+              webrtcVoiceRef.current.callPeer(row.peer_id);
+            }
           });
-
-          // Connect to peer if in same room and has peer_id
-          if (activeRoomId && rId === activeRoomId && !existingMe && row.peer_id && webrtcVoiceRef.current) {
-            webrtcVoiceRef.current.callPeer(row.peer_id);
-          }
-        });
-        setParticipantsByRoom(grouped);
+          setParticipantsByRoom(grouped);
+        }
+      } catch (err) {
+        console.warn('Presence fetch error:', err);
       }
     };
 
     fetchPresence();
+
+    // Poll every 3 seconds for bulletproof sync across browsers
+    const interval = setInterval(fetchPresence, 3000);
 
     const channel = supabase
       .channel('rtx-presence-changes')
@@ -186,6 +191,7 @@ export default function App() {
       .subscribe();
 
     return () => {
+      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, [isSupabaseConnected, activeRoomId, currentUser.id]);
@@ -195,7 +201,6 @@ export default function App() {
     const supabase = getSupabase();
     if (!supabase) return;
 
-    // Fetch recent messages
     supabase
       .from('rtx_messages')
       .select('*')
@@ -227,7 +232,6 @@ export default function App() {
         }
       });
 
-    // Realtime channel
     const channel = supabase
       .channel('rtx-messages-realtime')
       .on(
@@ -306,13 +310,15 @@ export default function App() {
       if (!roomId) {
         await supabase.from('rtx_voice_presence').delete().eq('user_id', currentUser.id);
       } else {
+        const safeRoomId = roomId.replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeUserId = currentUser.id.replace(/[^a-zA-Z0-9_-]/g, '');
         await supabase.from('rtx_voice_presence').upsert({
           user_id: currentUser.id,
           room_id: roomId,
           user_name: currentUser.name,
           user_avatar: currentUser.avatar,
           user_role: currentUser.role,
-          peer_id: peerId || `rtx_${roomId.replace(/[^a-zA-Z0-9_-]/g, '')}_${currentUser.id.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+          peer_id: peerId || `rtx_${safeRoomId}_${safeUserId}`,
           is_muted: currentUser.isMuted,
           is_speaking: currentUser.isSpeaking,
           rtx_active: currentUser.rtxVoiceActive,
@@ -378,6 +384,34 @@ export default function App() {
                 return {
                   ...prev,
                   [room.id]: list.map((u) => (u.id === speakingUserId ? { ...u, isSpeaking: isSpk } : u)),
+                };
+              });
+            },
+            onPeerDiscovered: (discoveredUserId) => {
+              // Automatically make sure friend is visible in room participants
+              setParticipantsByRoom((prev) => {
+                const list = prev[room.id] || [];
+                if (list.some((u) => u.id === discoveredUserId)) return prev;
+                return {
+                  ...prev,
+                  [room.id]: [
+                    ...list,
+                    {
+                      id: discoveredUserId,
+                      name: 'هم‌اتاقی RTX',
+                      avatar: GAMING_AVATARS[1],
+                      role: 'member',
+                      isMuted: false,
+                      isDeafened: false,
+                      isScreenSharing: false,
+                      rtxVoiceActive: true,
+                      rtxNoiseSuppression: 80,
+                      rtxRoomEchoRemoval: true,
+                      rtxVoiceBassBoost: true,
+                      isSpeaking: false,
+                      speakingVolume: 0,
+                    },
+                  ],
                 };
               });
             },
@@ -475,7 +509,7 @@ export default function App() {
           reactions: newMsg.reactions,
         })
         .then(({ error }) => {
-          if (error) console.warn('Supabase message insert error:', error.message);
+          if (error) console.warn('Supabase message insert note:', error.message);
         });
     }
   };
@@ -565,7 +599,7 @@ export default function App() {
         {/* Realtime voice transmission indicator */}
         {activeRoomId && (
           <div
-            title="انتقال صدای واقعی WebRTC متصل است"
+            title="انتقال صدای زنده WebRTC فعال است"
             className="w-12 h-12 rounded-2xl bg-[#23a55a]/20 border border-[#23a55a]/40 text-[#23a55a] flex flex-col items-center justify-center animate-pulse"
           >
             <Radio className="w-4 h-4" />
@@ -577,7 +611,7 @@ export default function App() {
         <button
           onClick={() => setIsAuthModalOpen(true)}
           title={supabaseUserEmail ? `وارد شده با: ${supabaseUserEmail}` : 'ورود / ثبت‌نام با ایمیل'}
-          className={`w-12 h-12 rounded-2xl transition-all duration-200 flex flex-col items-center justify-center shadow ${
+          className={`w-12 h-12 rounded-2xl transition-all duration-200 flex flex-col items-center justify-center shadow mt-auto ${
             supabaseUserEmail
               ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
               : 'bg-[#2b2d31] hover:bg-[#35363c] text-neutral-300'
@@ -585,19 +619,6 @@ export default function App() {
         >
           <LogIn className="w-5 h-5" />
           <span className="text-[8px] font-bold mt-0.5">{supabaseUserEmail ? 'اکانت' : 'ورود'}</span>
-        </button>
-
-        {/* Supabase Database Connection */}
-        <button
-          onClick={() => setIsSupabaseModalOpen(true)}
-          title="اتصال و بررسی دیتابیس Supabase"
-          className={`w-12 h-12 rounded-2xl transition-all duration-200 flex items-center justify-center shadow mt-auto ${
-            isSupabaseConnected
-              ? 'bg-[#23a55a]/20 border border-[#23a55a]/40 text-[#23a55a]'
-              : 'bg-[#2b2d31] text-neutral-400 hover:text-white'
-          }`}
-        >
-          <Database className="w-5 h-5" />
         </button>
       </div>
 
@@ -614,7 +635,7 @@ export default function App() {
         onToggleMute={handleToggleMute}
         onToggleDeafen={handleToggleDeafen}
         isSupabaseLive={isSupabaseConnected}
-        onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        onOpenSupabaseModal={() => {}}
       />
 
       {/* 3. Center Main Stage */}
@@ -644,7 +665,7 @@ export default function App() {
             </h1>
 
             <p className="text-sm text-neutral-400 leading-relaxed">
-              انتقال صدای واقعی بین کاربران به کمک WebRTC برقرار است؛ به طوری که هر صدایی با فیلتر بلادرنگ حذف نویز RTX پردازش شده و مستقیماً به گوش دیگران در همان روم می‌رسد.
+              صدای شما مستقیماً از طریق شبکه P2P با فیلتر بلادرنگ حذف نویز RTX به گوش تمام دوستان حاضر در همان اتاق صوتی می‌رسد.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-right">
@@ -669,39 +690,31 @@ export default function App() {
                   <Users className="w-4 h-4" />
                 </div>
                 <h3 className="text-white text-xs font-bold">۵ روم عمومی (۴ نفره)</h3>
-                <p className="text-[11px] text-neutral-400">ظرفیت دقیق ۴ نفره بدون حضور هیچ کاربر فیک</p>
+                <p className="text-[11px] text-neutral-400">ظرفیت دقیق ۴ نفره واقعی بدون هیچ کاربر فیک</p>
               </div>
             </div>
 
             <div className="pt-2 flex items-center justify-center gap-3">
-              {!supabaseUserEmail ? (
+              <button
+                onClick={() => {
+                  const firstPub = VOICE_ROOMS.find((r) => r.category === 'public');
+                  if (firstPub) handleJoinRoom(firstPub);
+                }}
+                className="px-6 py-3 bg-[#23a55a] hover:bg-[#1f924f] text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center gap-2"
+              >
+                <Volume2 className="w-4 h-4" />
+                ورود به اتاق عمومی ۱
+              </button>
+
+              {!supabaseUserEmail && (
                 <button
                   onClick={() => setIsAuthModalOpen(true)}
                   className="px-6 py-3 bg-[#5865f2] hover:bg-[#4752c4] text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
-                  ورود یا ثبت‌نام با ایمیل
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    const firstPub = VOICE_ROOMS.find((r) => r.category === 'public');
-                    if (firstPub) handleJoinRoom(firstPub);
-                  }}
-                  className="px-6 py-3 bg-[#23a55a] hover:bg-[#1f924f] text-white rounded-xl font-bold text-sm shadow-lg transition flex items-center gap-2"
-                >
-                  <Volume2 className="w-4 h-4" />
-                  ورود به اتاق عمومی ۱
+                  ورود / ثبت‌نام
                 </button>
               )}
-
-              <button
-                onClick={() => setIsRTXPanelOpen(true)}
-                className="px-5 py-3 bg-[#76b900]/10 hover:bg-[#76b900]/20 border border-[#76b900]/40 text-[#76b900] rounded-xl font-bold text-sm transition flex items-center gap-2"
-              >
-                <Sparkles className="w-4 h-4" />
-                تنظیمات فیلتر صوتی RTX
-              </button>
             </div>
           </div>
         </div>
@@ -741,25 +754,12 @@ export default function App() {
         onTriggerSound={handleTriggerSoundpad}
       />
 
-      <SupabaseModal
-        isOpen={isSupabaseModalOpen}
-        onClose={() => setIsSupabaseModalOpen(false)}
-        onSaved={() => {
-          setIsSupabaseConnected(isSupabaseConfigured());
-          refreshUserFromSupabase();
-        }}
-      />
-
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={() => {
           setIsSupabaseConnected(isSupabaseConfigured());
           refreshUserFromSupabase();
-        }}
-        onOpenDbModal={() => {
-          setIsAuthModalOpen(false);
-          setIsSupabaseModalOpen(true);
         }}
       />
     </div>

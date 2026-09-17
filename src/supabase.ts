@@ -3,18 +3,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Supabase client instance
 let supabaseClient: SupabaseClient | null = null;
 
-export const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_HeDPdD-SWAOVay-aPm8AZw_YC5HZe4F';
-
-// Helper to normalize Supabase URL and prevent "Invalid path specified"
+// Helper to normalize Supabase URL and prevent invalid path
 export function normalizeSupabaseUrl(url: string): string {
   if (!url) return '';
   let cleaned = url.trim();
-
-  // If user pasted something without https://
   if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
     cleaned = 'https://' + cleaned;
   }
-
   try {
     const parsed = new URL(cleaned);
     return `${parsed.protocol}//${parsed.host}`;
@@ -23,15 +18,16 @@ export function normalizeSupabaseUrl(url: string): string {
   }
 }
 
+// Read configured values from environment or localStorage
 export function getStoredSupabaseConfig() {
   const envUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_PUBLISHABLE_KEY;
+  const envKey = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY || '';
 
   const localUrl = localStorage.getItem('rtx_supabase_url') || '';
   const localKey = localStorage.getItem('rtx_supabase_key') || '';
 
-  const finalUrl = normalizeSupabaseUrl(localUrl || envUrl || '');
-  const finalKey = (localKey || envKey || DEFAULT_PUBLISHABLE_KEY).trim();
+  const finalUrl = (localUrl || envUrl || '').trim().replace(/\/+$/, '');
+  const finalKey = (localKey || envKey || '').trim();
 
   return {
     url: finalUrl,
@@ -40,7 +36,7 @@ export function getStoredSupabaseConfig() {
 }
 
 export function saveSupabaseConfig(url: string, key: string) {
-  const cleanUrl = normalizeSupabaseUrl(url);
+  const cleanUrl = url.trim().replace(/\/+$/, '');
   const cleanKey = key.trim();
 
   if (cleanUrl) localStorage.setItem('rtx_supabase_url', cleanUrl);
@@ -50,7 +46,13 @@ export function saveSupabaseConfig(url: string, key: string) {
 
 export function isSupabaseConfigured(): boolean {
   const { url, key } = getStoredSupabaseConfig();
-  return Boolean(url && key && url.startsWith('http') && !url.includes('example.supabase.co') && url.includes('.supabase.co'));
+  return Boolean(
+    url &&
+    key &&
+    url.startsWith('http') &&
+    !url.includes('example.supabase.co') &&
+    url.includes('.supabase.co')
+  );
 }
 
 export function getSupabase(): SupabaseClient | null {
@@ -76,8 +78,7 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 // Complete idempotent SQL Schema for Supabase
-export const SUPABASE_SQL_SETUP_GUIDE = `-- 🟢 RTX_VOICE Idempotent Database Schema (بدون ارور در اجرای مجدد)
--- این متن را به طور کامل در تب SQL Editor پنل Supabase کپی کرده و Run را بزنید:
+export const SUPABASE_SQL_SETUP_GUIDE = `-- 🟢 RTX_VOICE Idempotent Database Schema (اجرا در SQL Editor سوپربیس)
 
 -- ۱. ساخت جدول کاربران با نقش‌ها
 CREATE TABLE IF NOT EXISTS public.rtx_profiles (
@@ -117,7 +118,7 @@ CREATE TABLE IF NOT EXISTS public.rtx_messages (
   reactions JSONB DEFAULT '{}'::jsonb
 );
 
--- ۴. ساخت تریگر برای ساخت اتوماتیک پروفایل با نقش member پس از ثبت‌نام
+-- ۴. ساخت تریگر برای ثبت‌نام خودکار پروفایل با نقش member
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -139,7 +140,7 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- ۵. اضافه کردن ایمن جداول به Realtime (جلوگیری از خطای 42710)
+-- ۵. اضافه کردن ایمن جداول به Realtime
 DO $$
 BEGIN
   BEGIN
@@ -158,7 +159,7 @@ BEGIN
   END;
 END $$;
 
--- ۶. تنظیمات RLS (حذف پالیسی قبلی در صورت وجود و ساخت مجدد)
+-- ۶. تنظیمات RLS
 ALTER TABLE public.rtx_profiles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Profiles select all" ON public.rtx_profiles;
 CREATE POLICY "Profiles select all" ON public.rtx_profiles FOR SELECT USING (true);

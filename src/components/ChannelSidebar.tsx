@@ -75,20 +75,6 @@ export const ChannelSidebar: React.FC<Props> = ({
             </div>
           </div>
         </div>
-
-        {/* Supabase status badge button */}
-        <button
-          onClick={onOpenSupabaseModal}
-          title={isSupabaseLive ? 'Supabase متصل است' : 'تنظیم دیتابیس رایگان Supabase'}
-          className={`p-1.5 rounded-lg text-xs flex items-center gap-1 transition ${
-            isSupabaseLive
-              ? 'bg-[#23a55a]/20 text-[#23a55a] hover:bg-[#23a55a]/30'
-              : 'bg-[#1e1f22] hover:bg-[#35363c] text-neutral-400'
-          }`}
-        >
-          <span className={`w-2 h-2 rounded-full ${isSupabaseLive ? 'bg-[#23a55a]' : 'bg-neutral-500'}`} />
-          <span className="text-[11px] font-mono">DB</span>
-        </button>
       </div>
 
       {/* Voice Channels List */}
