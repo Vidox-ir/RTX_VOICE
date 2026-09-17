@@ -1,9 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Supabase client instance
+// Default Supabase project credentials provided for RTX_VOICE
+const DEFAULT_SUPABASE_URL = 'https://wfaeehlkxbflpuhnoigj.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmYWVlaGxreGJmbHB1aG5vaWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NzU5MDgsImV4cCI6MjEwNTI1MTkwOH0.qJTTb9cRp-XNuYjdP-wJM_Q0WbQQ37greZ46s3Cdu5I';
+
 let supabaseClient: SupabaseClient | null = null;
 
-// Helper to normalize Supabase URL and prevent invalid path
+// Helper to normalize Supabase URL and prevent invalid path like /rest/v1/
 export function normalizeSupabaseUrl(url: string): string {
   if (!url) return '';
   let cleaned = url.trim();
@@ -18,16 +22,27 @@ export function normalizeSupabaseUrl(url: string): string {
   }
 }
 
-// Read configured values from environment or localStorage
+// Read configured values from environment, localStorage or fallback defaults
 export function getStoredSupabaseConfig() {
   const envUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_URL || '';
   const envKey = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SUPABASE_ANON_KEY || '';
 
-  const localUrl = localStorage.getItem('rtx_supabase_url') || '';
-  const localKey = localStorage.getItem('rtx_supabase_key') || '';
+  let localUrl = localStorage.getItem('rtx_supabase_url') || '';
+  let localKey = localStorage.getItem('rtx_supabase_key') || '';
 
-  const finalUrl = (localUrl || envUrl || '').trim().replace(/\/+$/, '');
-  const finalKey = (localKey || envKey || '').trim();
+  // Clear if stale, invalid, or example placeholder
+  if (localUrl && (!localUrl.includes('.supabase.co') || localUrl.includes('example.supabase.co'))) {
+    localStorage.removeItem('rtx_supabase_url');
+    localStorage.removeItem('rtx_supabase_key');
+    localUrl = '';
+    localKey = '';
+  }
+
+  const rawUrl = localUrl || envUrl || DEFAULT_SUPABASE_URL;
+  const rawKey = localKey || envKey || DEFAULT_SUPABASE_ANON_KEY;
+
+  const finalUrl = normalizeSupabaseUrl(rawUrl);
+  const finalKey = rawKey.trim();
 
   return {
     url: finalUrl,
@@ -36,7 +51,7 @@ export function getStoredSupabaseConfig() {
 }
 
 export function saveSupabaseConfig(url: string, key: string) {
-  const cleanUrl = url.trim().replace(/\/+$/, '');
+  const cleanUrl = normalizeSupabaseUrl(url);
   const cleanKey = key.trim();
 
   if (cleanUrl) localStorage.setItem('rtx_supabase_url', cleanUrl);
@@ -49,9 +64,9 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(
     url &&
     key &&
-    url.startsWith('http') &&
-    !url.includes('example.supabase.co') &&
-    url.includes('.supabase.co')
+    url.startsWith('https://') &&
+    url.includes('.supabase.co') &&
+    !url.includes('example.supabase.co')
   );
 }
 

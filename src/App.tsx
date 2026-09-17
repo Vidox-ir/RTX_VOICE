@@ -3,7 +3,7 @@ import { VOICE_ROOMS } from './roomsConfig';
 import { VoiceRoom, AppUser, ChatMessage, SoundpadItem } from './types';
 import { DEFAULT_SOUNDPAD_ITEMS } from './soundpadData';
 import { RTXAudioEngine } from './rtxAudio';
-import { WebRTCVoiceRoomManager } from './webrtcVoice';
+import { WebRTCVoiceRoomManager, DiscoveredPeerPayload } from './webrtcVoice';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { GAMING_AVATARS } from './avatars';
 
@@ -18,7 +18,7 @@ import { AuthModal } from './components/AuthModal';
 import { Volume2, Sparkles, Crown, Star, Users, Headset, LogIn, Radio } from 'lucide-react';
 
 export default function App() {
-  // Current user state (Default is Member, never Admin/VIP without Supabase grant)
+  // Current user state
   const [currentUser, setCurrentUser] = useState<AppUser>(() => {
     const saved = localStorage.getItem('rtx_current_user');
     if (saved) {
@@ -62,7 +62,7 @@ export default function App() {
         userName: 'سرور صوتی RTX',
         userRole: 'admin',
         userAvatar: GAMING_AVATARS[1],
-        content: 'به سرور صوتی RTX خوش آمدید! انتقال صدای P2P شفاف با فیلتر هوش مصنوعی فعال است. وارد اتاق‌ها شده و با دوستان خود صحبت کنید.',
+        content: 'به سرور صوتی RTX خوش آمدید! انتقال صدای بلادرنگ P2P با فیلتر هوش مصنوعی فعال است. وارد هر اتاق شوید تا با دوستان خود مکالمه زنده داشته باشید.',
         timestamp: Date.now() - 3600000,
         reactions: { '🎙️': ['system'] },
       },
@@ -135,7 +135,21 @@ export default function App() {
     refreshUserFromSupabase();
   }, [isSupabaseConnected]);
 
-  // Real-time Voice Presence Sync
+  // Helper to add or update participant in a room
+  const upsertParticipantInRoom = (roomId: string, user: AppUser) => {
+    setParticipantsByRoom((prev) => {
+      const list = prev[roomId] || [];
+      const index = list.findIndex((u) => u.id === user.id);
+      if (index >= 0) {
+        const copy = [...list];
+        copy[index] = { ...copy[index], ...user };
+        return { ...prev, [roomId]: copy };
+      }
+      return { ...prev, [roomId]: [...list, user] };
+    });
+  };
+
+  // Real-time Voice Presence Sync with Supabase + WebRTC Peer discovery
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -149,39 +163,55 @@ export default function App() {
             const rId = row.room_id;
             if (!grouped[rId]) grouped[rId] = [];
 
-            const existingMe = row.user_id === currentUser.id;
-            grouped[rId].push({
+            const isMe = row.user_id === currentUser.id;
+            const userObj: AppUser = {
               id: row.user_id,
-              name: existingMe ? currentUser.name : row.user_name,
-              avatar: existingMe ? currentUser.avatar : (row.user_avatar || GAMING_AVATARS[0]),
+              name: isMe ? currentUser.name : row.user_name,
+              avatar: isMe ? currentUser.avatar : (row.user_avatar || GAMING_AVATARS[0]),
               role: row.user_role || 'member',
-              isMuted: existingMe ? currentUser.isMuted : Boolean(row.is_muted),
-              isDeafened: existingMe ? currentUser.isDeafened : false,
-              isScreenSharing: existingMe ? currentUser.isScreenSharing : false,
+              isMuted: isMe ? currentUser.isMuted : Boolean(row.is_muted),
+              isDeafened: isMe ? currentUser.isDeafened : false,
+              isScreenSharing: isMe ? currentUser.isScreenSharing : false,
               rtxVoiceActive: Boolean(row.rtx_active),
               rtxNoiseSuppression: 80,
               rtxRoomEchoRemoval: true,
               rtxVoiceBassBoost: true,
-              isSpeaking: existingMe ? currentUser.isSpeaking : Boolean(row.is_speaking),
+              isSpeaking: isMe ? currentUser.isSpeaking : Boolean(row.is_speaking),
               speakingVolume: 0,
-            });
+            };
 
-            // Connect to peer voice stream if in same room
-            if (activeRoomId && rId === activeRoomId && !existingMe && row.peer_id && webrtcVoiceRef.current) {
-              webrtcVoiceRef.current.callPeer(row.peer_id);
+            grouped[rId].push(userObj);
+
+            // If a peer is in the same room as me, connect audio & data immediately!
+            if (activeRoomId && rId === activeRoomId && !isMe && row.peer_id && webrtcVoiceRef.current) {
+              webrtcVoiceRef.current.connectToPeer(row.peer_id, {
+                userId: row.user_id,
+                userName: row.user_name,
+                userAvatar: row.user_avatar,
+                userRole: row.user_role,
+              });
             }
           });
+
+          // Ensure I am in activeRoomId if not present yet
+          if (activeRoomId) {
+            if (!grouped[activeRoomId]) grouped[activeRoomId] = [];
+            if (!grouped[activeRoomId].some((u) => u.id === currentUser.id)) {
+              grouped[activeRoomId].push(currentUser);
+            }
+          }
+
           setParticipantsByRoom(grouped);
         }
       } catch (err) {
-        console.warn('Presence fetch error:', err);
+        console.warn('Presence fetch note:', err);
       }
     };
 
     fetchPresence();
 
-    // Poll every 3 seconds for bulletproof sync across browsers
-    const interval = setInterval(fetchPresence, 3000);
+    // Poll every 2.5 seconds to guarantee presence consistency across devices
+    const interval = setInterval(fetchPresence, 2500);
 
     const channel = supabase
       .channel('rtx-presence-changes')
@@ -194,7 +224,7 @@ export default function App() {
       clearInterval(interval);
       supabase.removeChannel(channel);
     };
-  }, [isSupabaseConnected, activeRoomId, currentUser.id]);
+  }, [isSupabaseConnected, activeRoomId, currentUser.id, currentUser.name, currentUser.avatar, currentUser.isMuted, currentUser.isSpeaking]);
 
   // Supabase real-time messages listener
   useEffect(() => {
@@ -376,6 +406,9 @@ export default function App() {
         if (webrtcVoiceRef.current && stream) {
           const peerId = await webrtcVoiceRef.current.joinVoice({
             userId: currentUser.id,
+            userName: currentUser.name,
+            userAvatar: currentUser.avatar,
+            userRole: currentUser.role,
             roomId: room.id,
             localStream: stream,
             onUserSpeaking: (speakingUserId, isSpk) => {
@@ -387,33 +420,29 @@ export default function App() {
                 };
               });
             },
-            onPeerDiscovered: (discoveredUserId) => {
+            onPeerDiscovered: (peerData: DiscoveredPeerPayload) => {
               // Automatically make sure friend is visible in room participants
-              setParticipantsByRoom((prev) => {
-                const list = prev[room.id] || [];
-                if (list.some((u) => u.id === discoveredUserId)) return prev;
-                return {
-                  ...prev,
-                  [room.id]: [
-                    ...list,
-                    {
-                      id: discoveredUserId,
-                      name: 'هم‌اتاقی RTX',
-                      avatar: GAMING_AVATARS[1],
-                      role: 'member',
-                      isMuted: false,
-                      isDeafened: false,
-                      isScreenSharing: false,
-                      rtxVoiceActive: true,
-                      rtxNoiseSuppression: 80,
-                      rtxRoomEchoRemoval: true,
-                      rtxVoiceBassBoost: true,
-                      isSpeaking: false,
-                      speakingVolume: 0,
-                    },
-                  ],
-                };
+              upsertParticipantInRoom(room.id, {
+                id: peerData.userId,
+                name: peerData.userName || 'هم‌اتاقی صوتی',
+                avatar: peerData.userAvatar || GAMING_AVATARS[1],
+                role: (peerData.userRole as AppUser['role']) || 'member',
+                isMuted: Boolean(peerData.isMuted),
+                isDeafened: false,
+                isScreenSharing: false,
+                rtxVoiceActive: true,
+                rtxNoiseSuppression: 80,
+                rtxRoomEchoRemoval: true,
+                rtxVoiceBassBoost: true,
+                isSpeaking: Boolean(peerData.isSpeaking),
+                speakingVolume: 0,
               });
+            },
+            onPeerLeft: (leftUserId) => {
+              setParticipantsByRoom((prev) => ({
+                ...prev,
+                [room.id]: (prev[room.id] || []).filter((u) => u.id !== leftUserId),
+              }));
             },
           });
           syncPresence(room.id, peerId);
@@ -449,6 +478,9 @@ export default function App() {
   const handleToggleMute = () => {
     const nextMuted = !currentUser.isMuted;
     setCurrentUser((u) => ({ ...u, isMuted: nextMuted, isSpeaking: !nextMuted ? u.isSpeaking : false }));
+    if (activeRoomId) {
+      syncPresence(activeRoomId);
+    }
   };
 
   // Toggle Deafen
@@ -665,7 +697,7 @@ export default function App() {
             </h1>
 
             <p className="text-sm text-neutral-400 leading-relaxed">
-              صدای شما مستقیماً از طریق شبکه P2P با فیلتر بلادرنگ حذف نویز RTX به گوش تمام دوستان حاضر در همان اتاق صوتی می‌رسد.
+              انتقال زنده و دوطرفه صدا با الگوریتم حذف نویز RTX. تمام اعضایی که وارد یک اتاق صوتی شوند فوراً همدیگر را دیده و صدای یکدیگر را می‌شنوند.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-right">
@@ -674,7 +706,7 @@ export default function App() {
                   <Crown className="w-4 h-4" />
                 </div>
                 <h3 className="text-white text-xs font-bold">۲ روم ادمین</h3>
-                <p className="text-[11px] text-neutral-400">فقط کاربرانی با نقش admin مجاز به ورود هستند</p>
+                <p className="text-[11px] text-neutral-400">فقط کاربران دارای رول admin مجاز به ورود هستند</p>
               </div>
 
               <div className="p-4 rounded-xl bg-[#2b2d31] border border-[#383a40] space-y-1.5">
@@ -682,7 +714,7 @@ export default function App() {
                   <Star className="w-4 h-4" />
                 </div>
                 <h3 className="text-white text-xs font-bold">۳ روم VIP</h3>
-                <p className="text-[11px] text-neutral-400">مخصوص کاربران دارای رول VIP و ادمین با کیفیت ۳۲۰kbps</p>
+                <p className="text-[11px] text-neutral-400">مخصوص رول‌های VIP و Admin با نرخ بیت ۳۲۰kbps</p>
               </div>
 
               <div className="p-4 rounded-xl bg-[#2b2d31] border border-[#383a40] space-y-1.5">
@@ -690,7 +722,7 @@ export default function App() {
                   <Users className="w-4 h-4" />
                 </div>
                 <h3 className="text-white text-xs font-bold">۵ روم عمومی (۴ نفره)</h3>
-                <p className="text-[11px] text-neutral-400">ظرفیت دقیق ۴ نفره واقعی بدون هیچ کاربر فیک</p>
+                <p className="text-[11px] text-neutral-400">ظرفیت دقیق ۴ نفره واقعی بدون کاربر مجازی</p>
               </div>
             </div>
 

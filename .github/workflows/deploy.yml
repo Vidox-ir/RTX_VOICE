@@ -36,6 +36,8 @@ jobs:
         run: npm run build
         env:
           VITE_BASE_PATH: /RTX_VOICE/
+          VITE_SUPABASE_URL: https://wfaeehlkxbflpuhnoigj.supabase.co
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndmYWVlaGxreGJmbHB1aG5vaWdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NzU5MDgsImV4cCI6MjEwNTI1MTkwOH0.qJTTb9cRp-XNuYjdP-wJM_Q0WbQQ37greZ46s3Cdu5I
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

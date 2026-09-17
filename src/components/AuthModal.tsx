@@ -41,7 +41,7 @@ export const AuthModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password: password.trim(),
           options: {
@@ -55,7 +55,11 @@ export const AuthModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
         if (error) {
           setErrorMsg(error.message);
         } else {
-          setSuccessMsg('حساب با موفقیت ایجاد شد! خوش آمدید.');
+          if (data?.session) {
+            setSuccessMsg('حساب کاربری با موفقیت ساخته شد و وارد شدید!');
+          } else {
+            setSuccessMsg('ثبت‌نام با موفقیت انجام شد! در حال انتقال...');
+          }
           setTimeout(() => {
             onSuccess();
             onClose();
